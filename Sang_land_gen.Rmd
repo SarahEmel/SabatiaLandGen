@@ -1,0 +1,362 @@
+---
+title: "S. angularis Landscape Genetic analyses"
+author: "Sarah Emel"
+date: "6/6/2020"
+output: pdf_document
+---
+
+
+Load libraries
+```{r}
+library(MuMIn)
+library(lme4)
+library(rdist)
+library(psych)
+```
+
+## MLPE functions
+```{r}
+#MLPE functions
+#use MLPE for model fitting, examining coefficients, CIs
+#use MLPEnoREML for model comparison
+
+MLPE <- function(variables, data) {
+  mod2 <- lme4::lFormula(variables, data = data, REML = TRUE)
+  dfun <- do.call(lme4::mkLmerDevfun, mod2)
+  opt <- lme4::optimizeLmer(dfun)
+  mod_2 <- lme4::mkMerMod(environment(dfun), opt, mod2$reTrms,fr = mod2$fr)
+  mod2$reTrms$Zt <- ZZ
+  # Refit the model
+  dfun <- do.call(lme4::mkLmerDevfun, mod2)
+  opt <- lme4::optimizeLmer(dfun)
+  modelout <- lme4::mkMerMod(environment(dfun), opt, mod2$reTrms,fr = mod2$fr)
+  return(modelout)
+}
+
+MLPEnoREML <- function(variables, data) {
+  mod2 <- lme4::lFormula(variables, data = data, REML = FALSE)
+  dfun <- do.call(lme4::mkLmerDevfun, mod2)
+  opt <- lme4::optimizeLmer(dfun)
+  mod_2 <- lme4::mkMerMod(environment(dfun), opt, mod2$reTrms,fr = mod2$fr)
+  mod2$reTrms$Zt <- ZZ
+  # Refit the model
+  dfun <- do.call(lme4::mkLmerDevfun, mod2)
+  opt <- lme4::optimizeLmer(dfun)
+  modelout <- lme4::mkMerMod(environment(dfun), opt, mod2$reTrms,fr = mod2$fr)
+  return(modelout)
+}
+```
+
+## Import LCP and Circuitscape output
+
+*Double check filepaths!*
+```{r}
+library(foreign)
+
+#get list of lcp files
+lcp.list <- list.files("./Sabatia_Resistance_2Rules_out/", pattern = ".dbf", full.names = T)
+test <- read.dbf(lcp.list[[1]]) #get first file
+df_lcp <- data.frame(test$pair_name) #use first file to create dataframe
+
+#add columns to dataframe for each file in list
+for (i in 1:length(lcp.list)){
+  x <- read.dbf(lcp.list[[i]])
+  y <- x[,2]
+  df <- data.frame(y) 
+}
+
+#format names
+lcpnames <- gsub("./Sabatia_Resistance_2Rules_out//new", lcp.list, fixed = TRUE, replacement = "LCP")
+lcpnames <- gsub(".dbf", "", lcpnames, fixed = TRUE)
+colnames(df_lcp) <- c("pair",lcpnames)
+#write.csv(df_lcp, "Sang_LCP_2Rules.csv") #uncomment to write file
+
+#get list of circuitscape files
+cs.list <- list.files("./forCircuitscape_2Rules/", pattern = "_3columns", full.names = T)
+test <- read.table(cs.list[[1]]) #get first file
+df_cs <- data.frame(test[,1:2]) #use first file to create dataframe
+
+#add columns to dataframe for each file in list
+for (i in 1:length(cs.list)){
+  x <- read.table(cs.list[[i]])
+  y <- x[,3]
+  df <- data.frame(y)
+  df_cs <- cbind(df_cs,df)
+}
+
+#format names
+csnames <- gsub("./forCircuitscape_2Rules//newcost", cs.list, fixed = TRUE,replacement = "resist")
+csnames <- gsub("_resistances_3columns.asc", "", csnames, fixed = TRUE)
+csnames <- gsub("_resistances_3columns.out", "", csnames, fixed = TRUE)
+colnames(df_cs) <- c("pop1","pop2",csnames)
+#write.csv(df_cs, "Sang_CS_2Rules.csv") #uncomment to write file
+
+#note: writing files for convenience
+#dataframe(s) could be used directly in next step
+```
+
+
+## Read in all files needed
+
+Read in data: genetic distance, IBD, IBR, IBE
+```{r}
+#genetic distance: FST
+fst <- read.csv("Sang_Fst_Genodive.csv", header = T)
+gdist <- fst[lower.tri(fst)] #get lower triangle of matrix
+
+#populations: make sure all pops listed in both pop1 and pop2
+pop <- read.csv(file="pops.csv",header=T)
+pop <- pop[,c(2:5,7)]
+
+#IBD, IBR:LCP and Circuitscape
+lcp <- read.csv(file="Sang_LCP_2Rules.csv",header=T)
+lcp <- lcp[,-c(1:2)]
+cs <- read.csv(file="Sang_CS_2Rules.csv",header=T)
+cs <- cs[,-c(1:3)]
+
+#soil data
+soil <- read.csv(file="envfinalall.csv", header=T) #site means
+
+#check that things are in the same order
+as.vector(soil$Pop) == colnames(fst)
+```
+
+## Calculate IBE
+
+These are done for each metal separately, but could be combined with PCA
+```{r}
+#Cr
+Cr <- as.data.frame(soil[,c("Cr")])
+row.names(Cr)<-soil$Pop #changing population names column to row names
+IBE.Cr<-data.matrix(rdist(Cr))
+IBE.Cr<-IBE.Cr[lower.tri(IBE.Cr)]
+#Cu
+Cu <- as.data.frame(soil[,c("Cu")])
+row.names(Cu)<-soil$Pop #changing population names column to row names
+IBE.Cu<-data.matrix(rdist(Cu))
+IBE.Cu<-IBE.Cu[lower.tri(IBE.Cu)]
+#Ni
+Ni <- as.data.frame(soil[,c("Ni")])
+row.names(Ni)<-soil$Pop #changing population names column to row names
+IBE.Ni<-data.matrix(rdist(Ni))
+IBE.Ni<-IBE.Ni[lower.tri(IBE.Ni)]
+#Zn
+Zn <- as.data.frame(soil[,c("MehZn")])
+row.names(Zn)<-soil$Pop #changing population names column to row names
+IBE.Zn<-data.matrix(rdist(Zn))
+IBE.Zn<-IBE.Zn[lower.tri(IBE.Zn)]
+```
+
+## Combine and prep data
+Combine IBD, IBR, and IBE data into a single dataframe
+```{r}
+alldata <- cbind(gdist,pop,lcp,cs,IBE.Cr,IBE.Cu,IBE.Ni,IBE.Zn)
+```
+
+## Run MLPE for all pairs of sites
+
+Scale and center distances
+```{r}
+all.scaled<-scale(alldata[,6:ncol(alldata)],center=T,scale=T)
+all.scaled<-cbind(alldata[,1:5],all.scaled)
+
+data<-all.scaled
+head(alldata)
+pop1<-data$pop1
+pop2<-data$pop2
+```
+
+Create output file and run MLPE functions
+```{r}
+#heading for the output file
+header <- noquote(paste("Var","AICc", "BIC", "R2m", "R2c","Est","2.5%", "97.5%",sep=" ")) 
+write.table(header, file = "Sang_MLPE_results_2Rules_alldata.txt", append=T, row.names=F, col.names=F, quote = F) 
+
+#prep
+Zl <- lapply(c("pop1","pop2"), function(nm) Matrix:::fac2sparse(data[[nm]],"d", drop=FALSE))
+ZZ <- Reduce("+", Zl[-1], Zl[[1]])
+
+#run MLPE loop (always check starting column #)
+for (i in (6:ncol(data))) {
+  #do model comparison with MLPEnoREML
+  fit <- MLPEnoREML(gdist ~ data[, i] + (1|pop1), data=data)
+    anova(fit)
+    a <- AICc(fit, k = length(unique(pop1))) #this make k = # pops, not # pairs
+    b <- BIC(fit)
+    r <- r.squaredGLMM(fit)
+    rm <- r[1]
+    rc <- r[2]
+  #get parameter estimates with REML
+  fitREML <- MLPE(gdist ~ data[, i] + (1|pop1), data=data)
+    est <- coef(summary(fitREML))
+    ci <- confint(fitREML, level = 0.95, method = "Wald")
+  out<- noquote(paste(colnames(data)[i],a, b, rm, rc,est[2,1], ci[4,1], ci[4,2],
+                      sep =" "))
+  #write.table(out, file = "Sang_MLPE_results_2Rules_alldata.txt", append=T,row.names=F,col.names=F, quote = F) #uncomment to write file
+}
+```
+
+
+## Run MLPE for within-spatial cluster only
+
+Subset for within-spatial cluster only and scale distances
+```{r}
+sepdata<-alldata[which(alldata$Cluster=='S'|alldata$Cluster=='N'),]
+data<-sepdata
+
+sep.scaled<-scale(sepdata[,6:ncol(sepdata)],center=T,scale=T)
+sep.scaled<-cbind(sepdata[,1:5],sep.scaled)
+
+data<-sep.scaled
+pop1<-data$pop1
+pop2<-data$pop2
+```
+
+Create output file and run MLPE functions
+```{r}
+#heading for the output file
+header <- noquote(paste("Var","AICc", "BIC", "R2m", "R2c","Est","2.5%", "97.5%",sep=" ")) 
+write.table(header, file = "Sang_MLPE_results_2Rules_separate.txt", append=T, row.names=F, col.names=F, quote = F) 
+
+#prep
+Zl <- lapply(c("pop1","pop2"), function(nm) Matrix:::fac2sparse(data[[nm]],"d", drop=FALSE))
+ZZ <- Reduce("+", Zl[-1], Zl[[1]])
+
+#run MLPE loop (always check starting column #)
+for (i in (6:ncol(data))) {
+  #do model comparison with MLPEnoREML
+  fit <- MLPEnoREML(gdist ~ data[, i] + (1|pop1), data=data)
+    anova(fit)
+    a <- AICc(fit, k = length(unique(pop1))) #this make k = # pops, not # pairs
+    b <- BIC(fit)
+    r <- r.squaredGLMM(fit)
+    rm <- r[1]
+    rc <- r[2]
+  #get parameter estimates with REML
+  fitREML <- MLPE(gdist ~ data[, i] + (1|pop1), data=data)
+    est <- coef(summary(fitREML))
+    ci <- confint(fitREML, level = 0.95, method = "Wald")
+  out<- noquote(paste(colnames(data)[i],a, b, rm, rc,est[2,1], ci[4,1], ci[4,2],
+                      sep =" "))
+  #write.table(out, file = "Sang_MLPE_results_2Rules_separate.txt", append=T,row.names=F,col.names=F, quote = F) #uncomment to write file
+}
+```
+
+## IBE with IBD
+
+IBE combinations
+Scale and center distances
+```{r}
+ibe.data<-alldata[,c("gdist","pop1","pop2","pair_name","eucdist","IBE.Zn")] #include IBD, top IBE
+
+ibe.scaled<-scale(ibe.data[,5:ncol(ibe.data)],center=T,scale=T)
+ibe.scaled<-cbind(ibe.data[,1:4],ibe.scaled)
+
+data<-ibe.scaled
+pop1<-data$pop1
+pop2<-data$pop2
+```
+ 
+```{r}
+#scale depends on which data are loaded above
+fit <- MLPEnoREML(gdist ~ data$IBE.Zn + data$eucdist + (1|pop1), data=data)
+anova(fit)
+  b <- BIC(fit)
+  a <- AICc(fit, k = length(unique(pop1))) #this make k = # pops, not # pairs
+  r <- r.squaredGLMM(fit)
+  rm <- r[1]
+  rc <- r[2]
+  fit
+  a
+  rm
+fit <- MLPE(gdist ~ data$IBE.Zn + data$eucdist + (1|pop1), data=data)
+  est <- coef(summary(fit))
+est
+
+#not written to file to keep separate
+```
+
+## Plot IBD. vs FST
+
+```{r}
+ggplot(data = plotdata, aes(x=(plotdata$eucdist/1000),y=plotdata$gdist,color = plotdata$Cluster)) +
+  xlab("Euclidean Distance (km)") +
+  ylab(expression(F[ST])) +
+  geom_point(shape=16,size=1.4) +
+  scale_color_manual(values = c("#00A0FA","#AA0A3C", "#000000"), name = "Sub-region", labels = c("West Chester", "State Line", "Between Regions")) +
+  #geom_smooth(method=lm,color="black",size=.5,se=FALSE,linetype="solid") +
+  theme_classic(base_size = 11) +
+  theme(axis.line.x = element_line(color="black", size = .5),
+        axis.line.y = element_line(color="black", size = .5),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(color="black",size = 9),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm")) 
+
+#ggsave("IBD_vs_FST.pdf",plot=last_plot(),width=130,height=180,units="mm",dpi=600) #uncomment to write file
+```
+
+
+## Genetic diversity vs. land use
+
+Read in data and prep for analysis
+Created combined cropland and low + high intensity development
+```{r}
+div <- read.csv("DiversityandBufferData10Mar2020.csv", header = T)
+div$cropalldev500<-div$crop500+div$alldev500
+div$cropalldev1k<-div$crop1k+div$alldev1k
+div$cropalldev250<-div$crop250+div$alldev250
+```
+
+Linear regressions for combined crop and development
+```{r}
+d<-(lm(Num ~ cropalldev500, data = div))
+e<-(lm(Hs ~ cropalldev500, data = div))
+f<-(lm(Gis ~ cropalldev500, data = div))
+
+d1<-summary(d)$coefficients[2,4]
+e1<-summary(e)$coefficients[2,4]
+f1<-summary(f)$coefficients[2,4]
+
+pval<-c(d1,e1,f1)
+
+#Benjamini Hochberg adjustment
+p.adjust(pval, "BH")
+```
+
+Check residuals for spatial autocorrelation
+```{r}
+library(ape)
+
+cropalldev.dists <- as.matrix(dist(cbind(div$UTM_N, div$UTM_E)))
+cropalldev.dists.inv <- 1/cropalldev.dists
+diag(cropalldev.dists.inv) <- 0 
+
+d.I <- Moran.I(d$residuals, cropalldev.dists.inv)
+e.I <- Moran.I(e$residuals, cropalldev.dists.inv)
+f.I <- Moran.I(f$residuals, cropalldev.dists.inv)
+
+c(d.I$p.value, e.I$p.value,f.I$p.value) #none of these residuals are significantly autocorrelated
+```
+
+
+## Plot expected heterozygosity vs. all types of human developed land
+```{r}
+library(ggplot2)
+
+ggplot(data = div, aes(x=div$cropalldev500,y=div$Hs)) +
+  xlab("Developed + crop") +
+  ylab(expression(H[e])) +
+  geom_point(shape=16,color="black",size=1) +
+  geom_smooth(method=lm,color="black",size=.5,se=FALSE,linetype="solid") +
+  theme_classic(base_size = 11) +
+  theme(axis.line.x = element_line(color="black", size = .5),
+        axis.line.y = element_line(color="black", size = .5),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(color="black",size = 9),
+        plot.margin=unit(c(0.5,0.5,0.5,0.5),"cm")) 
+
+#ggsave("GenDiv_LandCov.pdf",plot=last_plot(),width=80,height=80,units="mm",dpi=600) #uncomment to write file
+```
+
+
+
